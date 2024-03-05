@@ -1,0 +1,134 @@
+---
+title: "Peer-graded Assignment: NYPD Shooting Incident Data Report"
+author: "Mel Delgado"
+date: "2024-03-01"
+output:
+  pdf_document: default
+  html_document: default
+course: "dtsa-5301"
+---
+
+# Peer-graded Assignment: NYPD Shooting Incident Data Report
+
+## Course: DTSA-5301, Data Science as a Field
+
+#### Author: Mel Delgado
+
+## Introduction
+
+This report discusses my analysis of the NYPD Shooting Incident Data Report data for the Week 3 project. In the sections below I describe how I went about reading, tidying and transforming, modeling, and visualizing data. I conclude the report by discussing identified bias and how I went about mitigating bias for this report.
+
+## Setup chunk - Add tidyverse and other packages
+
+Before we get started, we add the necessary tools for our analysis. Namely, `tidyverse` (which includes many frequently used packages such as `ggplot2` and others) and `lubridate`.
+
+```{r setup}
+library(tidyverse)
+library(lubridate)
+```
+
+## Read the data
+
+The source of dataset for our analysis is available on [data.gov](https://catalog.data.gov/dataset).
+
+This project calls for searching for the term _NYPD Shooting Incident Data (Historic)_ and selecting the `.csv` file.
+
+### Store the base URL as a variable named `base_url` and the file named `rows.csv`
+```{r}
+base_url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/"
+
+file_name <- c("rows.csv")
+
+url <- str_c(base_url, file_name)
+```
+### Store the comma separated values in a variable named `incidents` using `read_csv()`
+```{r}
+incidents <- read_csv(url)
+```
+## Tidy and transform data
+
+To Tidy and transform the data, I only pull in the columns needed for the analysis I have in mind and store it in a variable named `shooting_incidents`. It stores the columns named `OCCUR_DATE`, `OCCUR_TIME`, `BORO`, and `STATISTICAL_MURDER_FLAG`. I would like the column name of `BORO` to change to `Borough`. To make the replacement, called `mutate()` and `select ()` to create a new column named `Borough` remove the column named `BORO`.
+
+I noticed that `OCCUR_DATE` is of type `chr` which will make is not the correct type so I'll change it to type `mdy` by calling `mutate`.
+
+```{r}
+shooting_incidents <- incidents %>%
+    select(c(OCCUR_DATE, OCCUR_TIME, BORO, STATISTICAL_MURDER_FLAG)) %>%
+    mutate(OCCUR_DATE = mdy(OCCUR_DATE),
+       OCCUR_TIME = hms(OCCUR_TIME),
+       STATISTICAL_MURDER_FLAG = as.logical(STATISTICAL_MURDER_FLAG),
+       Borough = BORO,
+       Year = year(OCCUR_DATE)) %>%
+    select(-c(BORO))
+```
+
+Next, I would like to know the number of deaths that occurred as a result of a shooting and store the information in a variable named `shooting_deaths`. To accomplish this, I used `filter` to only select values of `STATISTICAL_MURDER_FLAG` that are equal to `TRUE`.
+
+```{r}
+shooting_deaths <- shooting_incidents %>%
+        select(c(OCCUR_DATE, Borough, STATISTICAL_MURDER_FLAG)) %>%
+        filter(STATISTICAL_MURDER_FLAG == TRUE)
+
+non_fatal_shootings <- shooting_incidents %>%
+        select(c(OCCUR_DATE, Borough, STATISTICAL_MURDER_FLAG)) %>%
+        filter(STATISTICAL_MURDER_FLAG == FALSE)
+```        
+
+To be sure I am not missing data needed for my analysis, I call `View()` to see the tables of data as I would expect as well as `head()` to only see the first 6 lines of the data stored in a variable. In my case, I have the data needed for the analysis I have in mind.
+
+```{r}
+head(shooting_deaths)
+head(non_fatal_shootings)
+```
+
+If it were missing, I would return to the step where I read data in (perhaps from an additional source) and decide if I would need to join it to my existing set of data.
+
+## Modeling the Data
+
+To model the data, I would like to understand the murder rate by New York City borough. In other words, I would like to know what borough has the highest number of deaths occurring from shootings. I would also like to know the number of shootings that were not leathal.
+
+My approach is to group the data by borough and the summation of `STATISTICAL_MURDER_FLAG` equals `TRUE` and store the grouping in a variable named `shooting_deaths_by_boro`. I also group the data and and the summation of `STATISTICAL_MURDER_FLAG` equals `FALSE` and store the result in a variable named `non_fatal_shootings_by_boro`.
+
+```{r}
+shooting_deaths_by_boro <- shooting_deaths %>%
+        group_by(Borough) %>%
+        summarize(number_of_shooting_deaths = sum(STATISTICAL_MURDER_FLAG == TRUE))
+        
+non_fatal_shootings_by_boro <- non_fatal_shootings %>%
+        group_by(Borough) %>%
+        summarize(non_fatal_shootings = sum(STATISTICAL_MURDER_FLAG == FALSE))
+```
+
+## Visualizing the Data
+
+To visualize this data and analysis to tell a story, I used a bar chart with the number of shootings resulting in death in the y-axis and the borough on the x-axis. To create the bar charts I had in mind, I called `ggplot()` and `geom_bar()` to create a bar chart. I added descriptive text using `labs()` which is short for _labels_ to include better descriptions to the chart.
+
+```{r}
+shooting_incidents %>%
+    ggplot(aes(x = Borough, fill = Borough)) +
+    geom_bar() +
+    labs(title = "Number of Shootings Per New York City Borough",
+        subtitle = "2006 - 2022", x = "NYC Borough",
+        y = "Number of Shootings",
+        caption = "Illustration 1")
+```
+
+I called `ggplot()` and setup the aesthetic with `aes()` and the parameters to identify the data for the x and y axis. Then, I called `geom_bar()` as a means of creating a bar chart to visualize the number of deadly shootings per New York City borough.
+
+```{r}
+shooting_deaths_by_boro %>%
+    ggplot(aes(x = Borough, y = number_of_shooting_deaths)) +
+    geom_bar(stat = "identity", fill = "RED") +
+    labs(title = "Number of Deaths Per New York City Borough",
+        subtitle = "2006 - 2022", x = "New York City Borough",
+        y = "Number of Deaths",
+        caption = "Illustration 2")
+```
+
+After visualizing the data using two different bar charts, it raises additional questions to investigate. For example, I could continue the cycle of analyzing and modeling many more times to establish a likely percentage of deaths occurring as the result of shootings, the average age difference between the perpetrator and victim, the hour of the day in which fatal shootings are most likely to occur, and many more.
+
+## Bias Identification
+
+My personal bias was reflected in my choice of analyzing the occurrence of shootings by borough. In doing so, it reflects how my personal bias is to associate crime with the neighborhoods where they occur. My thought was to identify the most dangerous borough in the data.
+
+To mitigate the original bias, I looked to the data to show if shootings were fatal because I wanted to understand if shootings were a result of a perpetrator trying to harm a victim or if the shooter intended to cause death. The data suggests the highest death rate for shootings were Brooklyn and the Bronx and the same was true for the charts showing the number of fatalities that occurred. As such, I could only draw the conclusion that the number of fatalities were consistent with the number of shootings. In other words, shootings are likely to occur in death no matter where the shooting occurs.

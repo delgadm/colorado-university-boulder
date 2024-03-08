@@ -1,0 +1,436 @@
+---
+title: "Peer-graded Assignment: Reproducible Report on COVID-19 Data"
+author: "Mel Delgado"
+date: "2024-03-01"
+output:
+  pdf_document: default
+  html_document: default
+course: "dtsa-5301"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+# Steps in the Data Science Process
+
+The goal of this project is to analyze data about the effects of COVID-19 on the world and the United States. The sections below outline the approach and methodology used by data scientists to answer questions revealed within each iteration as discussed in this course. The steps are import, tidy, and iterate through transforming, visualizing, modeling, and finally communicating results.
+
+What follows is an application of this process as we reveals insights into the data about the effects of COVID-19 on the population.
+
+## Step 1 - Importing Data
+
+This is the first step in the data science process where we obtain data in a reproducible way. Doing so means we avoid absolute paths for accessing data if the data exists or is copied to a local disk and use relative paths instead. For this project, we retrieve the data from GitHub via a base URL and construct a fully qualified path for the the different data sets by appending the file name to the base URL as seen below using `str_c` (string concatenate) .
+
+Then, we create four different variables named `global_cases`, `global_deaths`, `US_cases`, and `US_deaths` corresponding to the fully qualified path of the four files found in the variable named `urls`.
+
+```{r Importing Data, message = FALSE}
+# Create and store the base URL
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+# Add a list of file names
+file_names <- c("time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv", "time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv")
+# Call string concatenate to add the base URL and file name to a variable named urls
+urls <- str_c(url_in, file_names)
+
+# Store data for each file in the corresponding variable
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+```
+
+## Step 2 - Tidying  and Transforming the Data
+
+### Tidying Data
+
+In this next step of the data science process, we want to see what the raw data looks like and clean it up to make it more usable and easier to work with. This could mean only pulling in what is necessary for our analysis or transforming the data in a way that makes it more useful.
+
+For example, at first glance, the data contained in `global_cases` include the columns named `Lat` and `Long` with the latitude and longitude information respectively. We won't need these columns for our analysis. Another observation is the case numbers are stored in columns by date. We can transform the data so the column data is changed to data contained in rows. We want to make all columns be rows of data with the exception of `Province/State`, `Country/Region`, `Lat`, and `Long`. Similar steps are taken to wrangle the data stored in `global_deaths`.
+
+```{r Tidying and Transforming Global Data part 1, message = FALSE}
+# Pivot all columns to rows except `Province/State`, `Country/Region`, `Lat`, and `Long`, exclude `Lat` and `Long`, and name the columns `date` and `cases`
+global_cases <- global_cases %>%
+  pivot_longer(cols = -c('Province/State',
+                         'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat, Long))
+
+# Pivot all columns to rows except `Province/State`, `Country/Region`, `Lat`, and `Long`, exclude `Lat` and `Long`, and name the columns `date` and `cases`
+global_deaths <- global_deaths %>%
+  pivot_longer(cols = -c('Province/State',
+                         'Country/Region',
+                         Lat, Long),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(Lat, Long))
+```
+
+### Transforming Data
+
+We would like to transform the data by joining the cases with the deaths followed by 
+
+
+We accomplish all of these objectives with the following code for the global cases:
+
+```{r Tidying and Transforming Global Data part 2, message = FALSE}
+# Transform the data by joining cases with the deaths, renaming `Country/Region` to `Country_Region`, renaming `Province/State` to `Province_State`, and calling mutate() to change the date object from a <chr> to <date>
+global <- global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Country_Region = 'Country/Region',
+         Province_State = 'Province/State') %>%
+  mutate(date = mdy(date))
+
+# The data contain rows with negative cases so filter for only cases that are positive
+global <- global %>% filter(cases > 0)
+
+# Take a look at the data to see if what summary describes looks reasonable
+summary(global)
+
+# Test the data by looking for cases greater than 100,000,000
+global %>% filter(cases > 100000000)
+```
+A similar approach is taken for the US data whereby we examine the data to understand what we are working with.
+```{r Tidying and Transforming US Data Part 1, message = FALSE}
+# Start building the data by trying out pivoting the UID through Combined_Key to rows to see what it produces
+US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases")
+```
+
+Now that we have a better understanding of the data and how we want to transform it, we apply the same logic, select Admin2 through cases, mutate the data from a `<str>` to a `date` object, and remove the columns named `Lat` and `Long_`. Similarly, do the same to the data stored in `US_deaths`.
+
+We combined `US_cases` and `US_deaths` with a `full_join` and store the result in a variable named `US`.
+```{r Tidying and Transforming US Data Part 2, message = FALSE}
+# Building on the last step as an experiment, pivot the columns UID through Combined_Key to rows with columns named `date` and `cases`, select Admin2 through cases columns, mutate the object type from <str> to <date> for `date`, and exclude the `Lat` and `Long` columns.
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+# Similarly, repeat the steps above for `US_deaths`
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+# Join `US_cases` and `US_deaths` data to pull in the population that is absent in `US_cases`
+US <- US_cases %>%
+  full_join(US_deaths)
+```
+
+We can take a similar approach for the `global` data set by combining `Province_State` and `Country_Region` into `Combined_key` along with a comma and space as a separator. The result is the `global` data set has very similar data to `US` with the exception of the population data.
+
+To add the population data, we return to the Johns Hopkins website where there is a `*.csv` file containing population data we can add to the `global` data set. After downloading the data, remove the unneeded columns and join the resulting data with the `global` data set.
+```{r Tidying and Transforming US and Global Data Part 1, message = FALSE}
+# `unite()` combines `Province_State` and `Country_Region` with a comma and a space as a separator and store it in `Combined_key` in the `global` data set
+global <- global %>%
+  unite("Combined_Key",
+        c(Province_State, Country_Region),
+        sep = ", ",
+        na.rm = TRUE,
+        remove = FALSE)
+
+# Get data from the Johns Hopkins website, remove the columns named `Lat`, `Long_`, `Combined_Key`, `code3`, `iso2`, `iso3`, `Admin2`, and store it in a variable named `uid`
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+uid <- read_csv(uid_lookup_url) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+global <- global %>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  select(-c(UID, FIPS)) %>%
+  select(Province_State, Country_Region, date,
+         cases, deaths, Population,
+         Combined_Key)
+```
+
+## Step 3 - Visualizing, Analyzing, and Modeling Data
+
+### Analyzing
+
+Now that our data is tidy and transformed, it is ready for visualizing, analyzing and modeling. We start by analyzing data for the US as a whole and for a given state to see what we can we can glean from it.
+
+The analysis below starts taking the US data set and grouping it by `Province_State`, `Country_Region`, and `date` and then call `summarize()` to produce a sum of the cases, deaths, and Population of the counties for each state. Then, `mutate()` creates a new column named `deaths_per_mill` containing a calculated value of the number of deaths per million (deaths * 1000000/ Population) followed by selecting the desired columns.
+
+Similarly, the totals for the `US_by_state` data set is calculated as well.
+```{r Analyzing Data for the US as a Whole and for a Given State Part 1, message = FALSE}
+# Use the `US` data set to group by `Province_State`, `Country_Region`, and `date` and then call `summarize()` to produce a sum followed by mutate to create new columns, select the desired columns, and then `ungroup()`. Store the result in the variable named `US_by_state`.
+US_by_state <- US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths *1000000 / Population) %>%
+  select(Province_State, Country_Region, date,
+         cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+# Similarly, Use the `US_by_state` data set to group by `Province_State`, `Country_Region`, and `date` and then call `summarize()` to produce a sum followed by mutate to create new columns, select the desired columns, and then `ungroup(). Store the result in the variable named `US_totals`
+US_totals <- US_by_state %>%
+  group_by(Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths *1000000 / Population) %>%
+  select(Country_Region, date,
+         cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+# Verify what was added to `US_totals` by inspecting the top end of the data set using head()
+head(US_totals)
+# Verify the tail end of the data looks reasonable by calling `head()`
+tail(US_totals)
+```
+
+### Visualize
+
+### Let's visualize the US_total data set in the steps below. 
+
+First, apply a filter to visualize data for positive cases then set up the plot so the date is on the x-axis and the number of cases in on the y-axis. Then, plot a line and points for cases and another line for the number of deaths to the same graph and scale the y variable on a log scale.
+
+#### Number of COVID Cases and Number of Deaths in the United States
+
+```{r Visualize US_totals Data by Plotting the Number of Cases and Number of Deaths, message = FALSE, warning = FALSE}
+# Plot a line and points for cases and another line for the number of deaths to the same graph and scale the y variable on a log scale
+US_totals %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths" )) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+  
+```
+
+### Number of COVID Cases in the State of New York
+
+Similar to the visualization above of the US_totals, let's visualize the number of COVID cases and deaths in the state of New York using the `US_by_state` data set.
+
+The visualizations lead to questions such as, what is the maximum date and are the maximum number of deaths recorded?
+
+```{r Visualize Data for the state of New York by Plotting the Number of Cases and Number of Deaths, message = FALSE, warning = FALSE}
+
+# Set the string to `New York` for the `state` variable
+state <- "New York"
+# Plot a line and points for cases and another line for the number of deaths to the same graph and scale the y variable on a log scale
+US_by_state %>%
+  filter(Province_State == state) %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in ", state), y = NULL)
+
+# Have a look at the maximum date for the data set
+max(US_totals$date)
+# Have a look at the maximum number of deaths
+max(US_totals$deaths)
+```
+
+### Further Analysis and Modeling
+
+In the visualization, notice the number of cases seems to level off which raises questions. Does that mean there are no or very few new cases?
+
+The approach is to transform our data again by adding two new columns named `new_cases` and `new_deaths` to the data set.
+
+```{r Analyze Data again for the US and US_by_state, message = FALSE}
+# Add new column named `new_cases` and `new_deaths` to the data set
+US_by_state <- US_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+# Add new column named `new_cases` and `new_deaths` to the data set
+US_totals <- US_totals %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+
+# Inspect the resulting data set
+tail(US_totals %>% select(new_cases, new_deaths, everything()))
+```
+
+### Visualize
+```{r Visualize Newly Analyzed Data for the US by Plotting the Number of New Cases and Number of New Deaths, include = FALSE, message = FALSE, warning = FALSE}
+# Visualize the newly analyzed data of the number of new cases and deaths in the US
+US_totals %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position= "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+
+```
+```{r Visualize Newly Analyzed Data for the State of New York by Plotting the Number of New Cases and Number of New Deaths, message = FALSE, warning = FALSE}
+# Set the string to `New York` for the `state` variable
+state <- "New York"
+# Visualize the newly analyzed data of the number of new cases and new deaths in the state of New York
+US_by_state %>%
+  filter(Province_State == state) %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position= "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in ", state), y = NULL)
+```
+
+### Additional Analysis
+
+Looking at this new visualization brings up a different set of questions to consider. One of the questions is which states have the highest and lowest numbers of cases and deaths. We analyze and transform the data by looking for the maximum number of cases and deaths by state.
+
+We can also look at the data for the smallest number of cases and deaths per thousand.
+
+Morover, we can predict the number of deaths by applying a linear model and then visualizing the points for both the existing and predicted cases when visualized in the next section.
+
+```{r Further Analyze Data to Look for the Largest and Lowest Number of Cases by State, message = FALSE, warning = FALSE}
+# Transform the data once again by grouping data by state and finding the maximum number of deaths cases per 1000 of the population. Only count positive cases and states with a population greater than zero
+US_state_totals <- US_by_state %>%
+  group_by(Province_State) %>%
+  summarize(deaths = max(deaths), cases = max(cases),
+                         population = max(Population),
+                         cases_per_thou = 1000* cases / population,
+                         deaths_per_thou = 1000* deaths / population) %>%
+  filter(cases > 0, population > 0)
+
+# Also look at the smallest number of cases and deaths per 1000
+US_state_totals %>%
+  slice_min(deaths_per_thou, n= 10)
+
+# Narrow down the data by selecting the columns `deaths_per_thou`, `cases_per_thou`, and `everthing()`
+US_state_totals %>%
+  slice_min(deaths_per_thou, n= 10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+
+# Look at the data for the states with the highest cases
+US_state_totals %>%
+  slice_max(deaths_per_thou, n = 10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+```
+
+```{r Modeling Data in Another Iteration to add Predicted Data, message = FALSE, warning = FALSE}
+# Create a linear model where the deaths_per_thou as being a function of the cases_per_thou 
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = US_state_totals)
+# Look at a summary of the linear model
+summary(mod)
+
+# See the smallest cases per thousand
+US_state_totals %>% slice_min(cases_per_thou)
+# See the largest cases per thousand
+US_state_totals %>% slice_max(cases_per_thou)
+
+# Model the data containing the US states with predictions and add a new column to reflect the prediction
+US_state_totals %>% mutate(pred = predict(mod))
+# Add the predicted value to US_state_totals and store the result in a variable named `US_tot_w_pred`
+US_tot_w_pred <- US_state_totals %>% mutate(pred = predict(mod))
+US_tot_w_pred
+```
+
+### Visualize the new analysis so we see the existing data and the predicted outcomes
+
+Using the existing data and predicted results from earlier, we can visualize the analysis on a chart with the existing cases with the blue dots and the predicted cases resulting from the linear model with the red dots.
+
+```{r Visualizing Data to See Predicted Deaths Per Thousand, message = FALSE}
+# Visualize the existing and predicted data by plotting the existing data in blue and predicted data in red
+US_tot_w_pred %>% ggplot() +
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), color = "blue") +
+  geom_point(aes(x = cases_per_thou, y = pred), color = "red")
+
+```
+
+## Bias Identification
+
+The analysis was fairly impartial but there were outliers in the data that were not taken into consideration. For example, we saw outliers in the plot containing the linear model showing the predictions. However, the outlying data were not considered for further analysis. This is not to say it was not identified and discussed verbally. Instead, it is a source of bias simply because it was not addressed.
+
+# My Additional Analysis
+
+As part of the project, I present my analysis and at least two visualizations. I live in El Dorado County, California and I would like to know more about the cases and deaths where I live. Much like the original analysis performed on the state of New York, I see that the number of cases and deaths flattening so it raises questions about why that might be.
+
+First, I organize my data by county and visualize the number of cases vs the number of deaths.
+
+```{r My Analysis of the US Data by County, message = FALSE}
+# Use the `US` data set to group by `Admin2` which is to say by county then `Province_State`, `Country_Region`, and `date` and then call `summarize()` to produce a sum followed by mutate to create new columns, select the desired columns, and then `ungroup()`. Store the result in the variable named `US_by_state`.
+US_by_county <- US %>%
+  group_by(Admin2, Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  select(Admin2, Province_State,
+         Country_Region, date, cases, deaths, Population) %>%
+  ungroup()
+```
+
+```{r My Visualization of the Number of Cases and Deaths in California, message = FALSE, warning = FALSE}
+# Set the string to `New York` for the `state` variable
+my_state <- "California"
+my_county <- "El Dorado"
+# Visualize the newly analyzed data of the number of new cases and new deaths in the state of New York
+US_by_county %>%
+  filter(Admin2 == my_county, Province_State == my_state, cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position= "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in ", my_county, " County"), y = NULL)
+```
+
+## My Further Analysis
+
+We see the flattening of the curve so I would like to know more about the new cases and deaths I create new columns for `new_cases` and `new_deaths` and add them to the `US_by_county` variable. Then I visualize the results by plotting `new_cases` and `new_deaths` and see that new deaths don't seem as leveled off and severe as the first visualization suggests.
+
+```{r Analyze Data again for the US_by_county, message = FALSE}
+# Add new column named `new_cases` and `new_deaths` to the data set
+US_by_county <- US_by_county %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+# Inspect the resulting data set
+#tail(US_by_county %>% select(new_cases, new_deaths, everything()))
+```
+```{r Visualize Data again for the US_by_county, message = FALSE, warning=FALSE}
+# Visualize the newly analyzed data of the number of new cases and new deaths in the state of New York
+US_by_county %>%
+  filter(Admin2 == my_county, Province_State == my_state, cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position= "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("New Cases and New Deaths Due to COVID19 in ", my_county, " County"), y = NULL)
+```
+
+## My Implicit Bias
+
+Analyzing and visualizing data for my state and county has implicit bias since I live here. While my curiosity about my county answers questions I may not have had before, it lacks data from surrounding counties or adjacent states that may contribute to the data within my county. As such, to mitigate my bias from the analysis, I could include data from adjacent states and counties to form more neutral conclusions. 
+
+## Conclusion
+
+This report analyzes and visualizes 4 data sets in iterations of the data science process in an effort to better understand cases and deaths due to the COVID 19 virus. The different steps in the data science process are performed and the outcomes presented for consideration including repeating steps as needed in effort to answer questions that surface data is visualized in a graph or when organized and revealed in the summary of tables. Questions are addressed by repeating the data gathering, analyzing, modeling, and visualizing processes to better understand the data. 
+
+We must also consider biases with our approach to our analysis. Biases are identified and mitigation is discussed. For example, towards the end of this project report, my willingness to narrow down the data set to the state and county I live in is a form of bias. Doing so, removes several considerations outside of my county and state that could potentially skew my analysis of my data. To mitigate the bias, I could be open to including surrounding counties or the entire state to be more inclusive of factors surrounding my county.
+
